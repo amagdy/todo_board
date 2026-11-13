@@ -61,6 +61,8 @@ const TB = (() => {
     s = esc(s);
     const codes = [];
     s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, u) =>
+      /^(https?:|\/)/i.test(u) ? `<img src="${u}" alt="${alt}" loading="lazy">` : m);
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) =>
       /^(https?:|mailto:|\/)/i.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : _);
     s = s.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<strong>${a || b}</strong>`);
@@ -69,6 +71,11 @@ const TB = (() => {
     s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
     return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
   }
+
+  const splitRow = l => l.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/)
+    .map(c => c.trim().replace(/\\\|/g, '|'));
+  const isSepRow = l => l != null && l.includes('-') && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(l);
+  const tableStart = (lines, i) => lines[i].includes('|') && isSepRow(lines[i + 1]);
 
   function renderMarkdown(src) {
     const lines = src.replace(/\r\n?/g, '\n').split('\n');
@@ -90,6 +97,19 @@ const TB = (() => {
         const buf = [];
         while (i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ''));
         out.push(`<blockquote>${renderMarkdown(buf.join('\n'))}</blockquote>`);
+      } else if (tableStart(lines, i)) {
+        const head = splitRow(lines[i]);
+        const align = splitRow(lines[i + 1]).map(c =>
+          /^:-+:$/.test(c) ? 'center' : /^-+:$/.test(c) ? 'right' : /^:-+$/.test(c) ? 'left' : '');
+        i += 2;
+        const cell = (tag, c, k) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ''}>${inline(c)}</${tag}>`;
+        const body = [];
+        while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+          const cells = splitRow(lines[i++]);
+          body.push(`<tr>${head.map((_, k) => cell('td', cells[k] || '', k)).join('')}</tr>`);
+        }
+        out.push(`<div class="md-table"><table><thead><tr>${head.map((c, k) => cell('th', c, k)).join('')}</tr></thead>` +
+                 `<tbody>${body.join('')}</tbody></table></div>`);
       } else if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
         const ordered = /^\s*\d+\./.test(line);
         const items = [];
@@ -103,8 +123,9 @@ const TB = (() => {
         out.push(`<${ordered ? 'ol' : 'ul'}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`);
       } else {
         const buf = [];
-        while (i < lines.length && lines[i].trim() &&
-               !/^(#{1,6}\s|```|>|\s*([-*+]|\d+\.)\s+|-{3,}\s*$)/.test(lines[i])) buf.push(lines[i++]);
+        do buf.push(lines[i++]);
+        while (i < lines.length && lines[i].trim() && !tableStart(lines, i) &&
+               !/^(#{1,6}\s|```|>|\s*([-*+]|\d+\.)\s+|-{3,}\s*$)/.test(lines[i]));
         out.push(`<p>${buf.map(inline).join('<br>')}</p>`);
       }
     }
@@ -407,6 +428,7 @@ const TB = (() => {
       const canDrag = !filtering();
       const row = h('div', { class: 'task-row' + (n.done ? ' done' : ''), draggable: canDrag, 'data-id': n.id },
         h('span', { class: 'handle', title: canDrag ? 'Drag to reorder / nest' : '' }, canDrag ? '⋮⋮' : ''),
+        canDrag ? moveButtons(n) : null,
         h('button', { class: 'twisty' + (hasKids ? '' : ' hidden'), onclick: () => {
           open ? collapsed.add(n.id) : collapsed.delete(n.id); saveCollapsed(); render(); } }, open ? '▾' : '▸'),
         h('input', { type: 'checkbox', checked: n.done, title: 'Mark as done',
@@ -431,6 +453,22 @@ const TB = (() => {
         li.append(sub);
       }
       return li;
+    }
+
+    /** Up/down arrows: swap with the previous/next sibling (same parent). */
+    function moveButtons(n) {
+      const sibs = index.get(n.id).parent.children;
+      const i = sibs.findIndex(c => c.id === n.id);
+      const move = async newIdx => {
+        await api('POST', `/api/tasks/${n.id}/move`,
+          { parent_task_id: index.get(n.id).parent.id, index: newIdx });
+        reload();
+      };
+      return h('span', { class: 'move-btns' },
+        h('button', { class: 'icon-btn', title: 'Move up (higher priority)', disabled: i === 0,
+          onclick: () => move(i - 1) }, '▲'),
+        h('button', { class: 'icon-btn', title: 'Move down (lower priority)', disabled: i === sibs.length - 1,
+          onclick: () => move(i + 1) }, '▼'));
     }
 
     function addSub(n) {
