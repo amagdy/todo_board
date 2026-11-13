@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Task Board{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">▦ Task Board</a>
+    <span class="spacer"></span>
+    <button id="tags-btn" class="btn">Tags</button>
+    <button id="backup-btn" class="btn primary">Backup</button>
+  </header>
+  <main id="app" class="container">{% block content %}{% endblock %}</main>
+  <dialog id="tags-dialog"></dialog>
+  <div id="toast" class="toast" hidden></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

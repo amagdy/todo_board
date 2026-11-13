@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Projects</h1>
+  <button id="new-project" class="btn primary">+ New project</button>
+</div>
+<div id="projects" class="project-grid"></div>
+{% endblock %}
+{% block scripts %}<script>TB.initIndex();</script>{% endblock %}

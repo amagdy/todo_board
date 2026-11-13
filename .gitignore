@@ -1,0 +1,18 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# App data lives in its own git repo (default: ../todo_board_data).
+# Ignored here in case TODO_BOARD_DATA points inside this folder.
+todo_board_data/
+*.db
+*.db-journal
+
+# Local config / OS / editor files
+.env
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
