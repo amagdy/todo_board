@@ -77,6 +77,27 @@ const TB = (() => {
   const isSepRow = l => l != null && l.includes('-') && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(l);
   const tableStart = (lines, i) => lines[i].includes('|') && isSepRow(lines[i + 1]);
 
+  /** Nested lists: an item indented deeper than the previous one becomes its sub-list. */
+  function listHtml(items) {
+    let k = 0;
+    const parse = base => {
+      const tag = items[k].ordered ? 'ol' : 'ul';
+      let html = '';
+      while (k < items.length && items[k].indent === base) {
+        const task = items[k].text.match(/^\[([ xX])\]\s+(.*)$/);
+        html += '<li>' + (task ? `<input type="checkbox" disabled ${task[1] !== ' ' ? 'checked' : ''}> ${inline(task[2])}`
+                               : inline(items[k].text));
+        k++;
+        while (k < items.length && items[k].indent > base) html += parse(items[k].indent);
+        html += '</li>';
+      }
+      return `<${tag}>${html}</${tag}>`;
+    };
+    let out = '';
+    while (k < items.length) out += parse(items[k].indent);
+    return out;
+  }
+
   function renderMarkdown(src) {
     const lines = src.replace(/\r\n?/g, '\n').split('\n');
     const out = [];
@@ -111,16 +132,12 @@ const TB = (() => {
         out.push(`<div class="md-table"><table><thead><tr>${head.map((c, k) => cell('th', c, k)).join('')}</tr></thead>` +
                  `<tbody>${body.join('')}</tbody></table></div>`);
       } else if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
-        const ordered = /^\s*\d+\./.test(line);
         const items = [];
         while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
-          let text = lines[i++].replace(/^\s*([-*+]|\d+\.)\s+/, '');
-          const task = text.match(/^\[([ xX])\]\s+(.*)$/);
-          text = task ? `<input type="checkbox" disabled ${task[1] !== ' ' ? 'checked' : ''}> ${inline(task[2])}`
-                      : inline(text);
-          items.push(`<li>${text}</li>`);
+          const m = lines[i++].replace(/\t/g, '    ').match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
+          items.push({ indent: m[1].length, ordered: /\d/.test(m[2]), text: m[3] });
         }
-        out.push(`<${ordered ? 'ol' : 'ul'}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`);
+        out.push(listHtml(items));
       } else {
         const buf = [];
         do buf.push(lines[i++]);
@@ -304,7 +321,7 @@ const TB = (() => {
     const root = document.getElementById('task-root');
     const collapsed = new Set(JSON.parse(localStorage.getItem('tb.collapsed') || '[]'));
     const saveCollapsed = () => localStorage.setItem('tb.collapsed', JSON.stringify([...collapsed]));
-    const filter = { q: '', tags: new Set() };
+    const filter = { q: '', tags: new Set(), due: '', sort: 'manual' };
     let state, index;               // index: id -> {node, parent}
     let dragId = null;
     let focusFilter = false;
@@ -329,8 +346,12 @@ const TB = (() => {
       root.replaceChildren(
         h('nav', { class: 'crumbs' },
           h('a', { href: '/' }, 'Projects'),
-          state.breadcrumbs.map(b => [' / ', h('a', { href: `/task/${b.id}` }, b.title)]),
-          ' / ', h('span', {}, t.title)),
+          state.breadcrumbs.flatMap(b => [
+            h('span', { class: 'crumb-sep' }, '›'),
+            h('a', { href: `/task/${b.id}`, class: 'crumb', title: `Go to ${b.task_type}: ${b.title}` },
+              (b.task_type === 'project' ? '▦ ' : '') + b.title)]),
+          h('span', { class: 'crumb-sep' }, '›'),
+          h('span', { class: 'crumb current' }, (t.task_type === 'project' ? '▦ ' : '') + t.title)),
         header(t, isProject),
         h('div', { class: 'two-col' }, tasksComponent(t), resourcesComponent(t)));
       if (hadFocus || focusFilter) { const f = document.getElementById('filter-q'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); focusFilter = false; }
@@ -374,9 +395,23 @@ const TB = (() => {
       const hay = (n.title + ' ' + n.description + ' ' + n.tags.map(t => t.name).join(' ')).toLowerCase();
       const words = filter.q.toLowerCase().split(/\s+/).filter(Boolean);
       if (!words.every(w => hay.includes(w))) return false;
+      if (filter.due && !(n.due_date && n.due_date <= filter.due)) return false;
       return [...filter.tags].every(name => n.tags.some(t => t.name === name));
     }
-    const filtering = () => filter.q.trim() !== '' || filter.tags.size > 0;
+    const filtering = () => filter.q.trim() !== '' || filter.tags.size > 0 || filter.due !== '';
+    const sorting = () => filter.sort !== 'manual';
+    const reorderLocked = () => filtering() || sorting();
+    /** Children in display order: manual priority, or by due date (undated tasks last). */
+    function kids(n) {
+      if (!sorting()) return n.children;
+      const dir = filter.sort === 'due-desc' ? -1 : 1;
+      return [...n.children].sort((a, b) => {
+        if (!a.due_date && !b.due_date) return 0;
+        if (!a.due_date) return 1;
+        if (!b.due_date) return -1;
+        return dir * a.due_date.localeCompare(b.due_date);
+      });
+    }
     /** Returns set of ids to show (matches + their ancestors) or null for all. */
     function visibleSet() {
       if (!filtering()) return null;
@@ -397,7 +432,7 @@ const TB = (() => {
     function tasksComponent(root) {
       const vis = visibleSet();
       const list = h('ul', { class: 'task-list' });
-      const rows = vis ? root.children.filter(c => vis.has(c.id)) : root.children;
+      const rows = kids(root).filter(c => !vis || vis.has(c.id));
       rows.forEach(c => list.append(taskRow(c, vis)));
       const addInput = h('input', { class: 'input grow', placeholder: 'Add a task and press Enter…',
         onkeydown: async e => {
@@ -415,8 +450,15 @@ const TB = (() => {
             class: 'chip filter-chip' + (filter.tags.has(t.name) ? ' on' : ''),
             style: `--c:${t.color};background:${filter.tags.has(t.name) ? t.color : 'transparent'};color:${filter.tags.has(t.name) ? textColor(t.color) : 'inherit'}`,
             onclick: () => { filter.tags.has(t.name) ? filter.tags.delete(t.name) : filter.tags.add(t.name); render(); } }, t.name)),
-            filtering() && h('button', { class: 'btn small', onclick: () => { filter.q = ''; filter.tags.clear(); render(); } }, 'Clear filter'))),
-        filtering() ? h('div', { class: 'muted small' }, 'Drag & drop is disabled while filtering.') : null,
+            filtering() && h('button', { class: 'btn small', onclick: () => { filter.q = ''; filter.tags.clear(); filter.due = ''; render(); } }, 'Clear filter')),
+          h('div', { class: 'row gap center wrap small' },
+            h('label', { class: 'row gap center' }, 'Due on or before',
+              h('input', { type: 'date', class: 'input', value: filter.due, onchange: e => { filter.due = e.target.value; render(); } })),
+            h('label', { class: 'row gap center' }, 'Sort',
+              h('select', { class: 'select', onchange: e => { filter.sort = e.target.value; render(); } },
+                [['manual', 'Priority (manual order)'], ['due-asc', 'Due date (earliest first)'], ['due-desc', 'Due date (latest first)']]
+                  .map(([v, l]) => h('option', { value: v, selected: filter.sort === v }, l)))))),
+        reorderLocked() ? h('div', { class: 'muted small' }, 'Reordering is disabled while filtering or sorting by date.') : null,
         rows.length ? list : h('p', { class: 'muted' }, filtering() ? 'No tasks match.' : 'No tasks yet.'),
         h('div', { class: 'row gap add-row' }, addInput));
     }
@@ -425,7 +467,7 @@ const TB = (() => {
     function taskRow(n, vis) {
       const hasKids = n.children.length > 0;
       const open = vis ? true : !collapsed.has(n.id);
-      const canDrag = !filtering();
+      const canDrag = !reorderLocked();
       const row = h('div', { class: 'task-row' + (n.done ? ' done' : ''), draggable: canDrag, 'data-id': n.id },
         h('span', { class: 'handle', title: canDrag ? 'Drag to reorder / nest' : '' }, canDrag ? '⋮⋮' : ''),
         canDrag ? moveButtons(n) : null,
@@ -449,7 +491,7 @@ const TB = (() => {
       const li = h('li', { class: 'task-item' }, row);
       if (hasKids && open) {
         const sub = h('ul', { class: 'task-list nested' });
-        n.children.filter(c => !vis || vis.has(c.id)).forEach(c => sub.append(taskRow(c, vis)));
+        kids(n).filter(c => !vis || vis.has(c.id)).forEach(c => sub.append(taskRow(c, vis)));
         li.append(sub);
       }
       return li;
