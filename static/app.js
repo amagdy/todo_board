@@ -434,7 +434,7 @@ const TB = (() => {
       const list = h('ul', { class: 'task-list' });
       const rows = kids(root).filter(c => !vis || vis.has(c.id));
       rows.forEach(c => list.append(taskRow(c, vis)));
-      const addInput = h('input', { class: 'input grow', placeholder: 'Add a task and press Enter…',
+      const addInput = h('input', { class: 'input grow add-task', placeholder: 'Add a task and press Enter…',
         onkeydown: async e => {
           if (e.key !== 'Enter' || !e.target.value.trim()) return;
           await api('POST', '/api/tasks', { title: e.target.value.trim(), parent_task_id: root.id });
@@ -487,6 +487,10 @@ const TB = (() => {
           const k = n.progress.total;
           if (!confirm(`Delete task "${n.title}"` + (k ? ` and its ${k} subtask${k > 1 ? 's' : ''}` : '') + ' and attached files?')) return;
           await api('DELETE', `/api/tasks/${n.id}`); reload(); } }, '🗑'));
+      row.addEventListener('dblclick', e => {
+        if (e.target.closest('button, a, select, .tag-editor, input[type=checkbox]')) return;
+        location.href = `/task/${n.id}`;
+      });
       if (canDrag) wireDrag(row, n);
       const li = h('li', { class: 'task-item' }, row);
       if (hasKids && open) {

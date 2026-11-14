@@ -87,3 +87,6 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 .crumb{max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .crumb.current{color:var(--fg);font-weight:600}
 .crumb-sep{opacity:.5}
+.task-row{cursor:default}
+.input.add-task{border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);padding:.45rem .7rem}
+.input.add-task:focus{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 30%,transparent);outline:none;background:color-mix(in srgb,var(--accent) 8%,var(--card))}
