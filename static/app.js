@@ -486,7 +486,9 @@ const TB = (() => {
         h('button', { class: 'icon-btn danger', title: 'Delete task', onclick: async () => {
           const k = n.progress.total;
           if (!confirm(`Delete task "${n.title}"` + (k ? ` and its ${k} subtask${k > 1 ? 's' : ''}` : '') + ' and attached files?')) return;
-          await api('DELETE', `/api/tasks/${n.id}`); reload(); } }, '🗑'));
+          await api('DELETE', `/api/tasks/${n.id}`); reload(); } }, '🗑'),
+        canDrag ? topButton(n) : null,
+        canDrag ? bottomButton(n) : null);
       row.addEventListener('dblclick', e => {
         if (e.target.closest('button, a, select, .tag-editor, input[type=checkbox]')) return;
         location.href = `/task/${n.id}`;
@@ -515,6 +517,28 @@ const TB = (() => {
           onclick: () => move(i - 1) }, '▲'),
         h('button', { class: 'icon-btn', title: 'Move down (lower priority)', disabled: i === sibs.length - 1,
           onclick: () => move(i + 1) }, '▼'));
+    }
+
+    /** Far-right button: push the task to the top of its siblings (highest priority). */
+    function topButton(n) {
+      const parent = index.get(n.id).parent;
+      return h('button', { class: 'icon-btn top-btn', title: 'Move to top (highest priority)',
+        disabled: parent.children[0].id === n.id,
+        onclick: async () => {
+          await api('POST', `/api/tasks/${n.id}/move`, { parent_task_id: parent.id, index: 0 });
+          reload();
+        } }, '⤒');
+    }
+
+    /** Far-right button: send the task to the end of its siblings (lowest priority). */
+    function bottomButton(n) {
+      const parent = index.get(n.id).parent;
+      return h('button', { class: 'icon-btn bottom-btn', title: 'Move to bottom (lowest priority)',
+        disabled: parent.children[parent.children.length - 1].id === n.id,
+        onclick: async () => {
+          await api('POST', `/api/tasks/${n.id}/move`, { parent_task_id: parent.id, index: 1e9 });
+          reload();
+        } }, '⤓');
     }
 
     function addSub(n) {
